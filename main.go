@@ -30,13 +30,13 @@ import (
 )
 
 const (
-	Kw = 1000       //3504
+	Kw = 1024       //3504
 	Kh = Kw * 3 / 4 //* 9 / 16 //
 	//2
 	winSize  = Kw * 1
 	winSizeh = Kh * 1
 	//
-	blockSize = 50
+	blockSize = 64
 	maxIter   = 250
 	wsz1      = Kw * 1
 	hsz1      = Kh * 1
@@ -129,7 +129,7 @@ func MandelbrotColor(cx, cy float64) uint32 {
 }
 
 // calcola un blocco 8x8 di Mandelbrot
-const KeachPixel = 5
+const KeachPixel = 1
 
 func drawBlock(px, py int) {
 
@@ -168,6 +168,9 @@ func drawBlock(px, py int) {
 			case 2:
 				//float32
 				color = mandel.PaintColor1(ix, iy, winSize*1.0, winSizeh)
+			case 3:
+				//float32
+				color = mandel.PaintColor2(ix, iy, winSize*1.0, winSizeh)
 			}
 
 			idx := iy*winSize + ix
@@ -289,7 +292,7 @@ func externWork() {
 	// goroutine che calcola blocchi progressivamente
 	go func() {
 
-		drawBlock(bx, by)
+		// drawBlock(bx, by)
 
 		for {
 
@@ -465,8 +468,20 @@ func keyCallback(w *glfw.Window, key glfw.Key, scancode int, action glfw.Action,
 			clear(pixels)
 
 		case glfw.KeyD: // coloarione painting sinusoidale
-			log.Println("tasto B on")
+			log.Println("tasto D on")
 			Mode = 2
+			F1 = true
+
+			sp = TspiralPosition{}
+
+			bx = winSize / blockSize / 2
+			by = winSizeh / blockSize / 2
+
+			repaint()
+
+		case glfw.KeyE: // coloarione tutto 1
+			log.Println("tasto E on")
+			Mode = 3
 			F1 = true
 
 			sp = TspiralPosition{}

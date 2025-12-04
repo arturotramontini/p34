@@ -249,6 +249,7 @@ func MandelColor2(ix, iy, ws, hs int, Vblkm *Tblkm) uint32 {
 	h := 0.0
 	hx := 0.0
 	hy := 0.0
+	_ = Vblkm
 
 	//--- per calcolare solo una volta invece di tre
 	//--- vale solo quando eps è multiplo di step ---------
@@ -286,7 +287,9 @@ func MandelColor2(ix, iy, ws, hs int, Vblkm *Tblkm) uint32 {
 	}
 
 	// gradiente
-	eps := 1.0e-18
+	eps := 1.0e-12
+	// eps := 1.0e-18
+	// eps := 1.0
 	dx := 1.0 * (hx - h) / eps / 1
 	dy := 1.0 * (hy - h) / eps / 1
 
@@ -512,5 +515,11 @@ func PaintColor1(ix, iy, ws, hs int) uint32 {
 
 	// var color uint32
 	color := (uint32(0xFF) << 24) | ((red & 0xFF) << 16) | ((gre & 0xFF) << 8) | (blu & 0xff)
+	return color
+}
+
+func PaintColor2(ix, iy, ws, hs int) uint32 {
+
+	color := uint32(0xFFFFFFFF)
 	return color
 }
