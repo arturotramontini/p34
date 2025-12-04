@@ -1,0 +1,42 @@
+{
+	"editor.fontSize": 16,
+"workbench.editor.showTabs": "multiple",
+"workbench.editor.enablePreview": false,
+"workbench.editor.enablePreviewFromQuickOpen": false,
+
+
+// Usa il language server ufficiale Go (gopls)
+"go.useLanguageServer": true,
+
+// Aggiorna automaticamente gli strumenti Go quando serve
+"go.toolsManagement.autoUpdate": true,
+
+// Format On Save (usa gofmt)
+"go.formatTool": "gofmt",
+"go.formatOnSave": true,
+
+// Evita che VSCode rimuova import validi
+"editor.codeActionsOnSave": {
+		"source.organizeImports": "explicit"
+},
+
+// Suggerimenti completamento codice
+"[go]": {
+		"editor.formatOnSave": true,
+		"editor.codeActionsOnSave": {
+				"source.organizeImports": "explicit"
+		}
+},
+"editor.lineHeight": 1.05,
+"editor.suggestLineHeight": 14
+
+
+
+
+
+
+// "editor.codeActionsOnSave": {
+// 	"source.organizeImports": "never"
+// }
+
+}

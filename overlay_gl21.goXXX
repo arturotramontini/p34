@@ -1,0 +1,190 @@
+package main
+
+import (
+	"fmt"
+	"math"
+
+	"github.com/go-gl/gl/v2.1/gl"
+)
+
+var (
+	overlayProg uint32
+	overlayVBO  uint32
+	winWpx      float32
+	winHpx      float32
+)
+
+//---------------------------------------------
+// SHADERS (GLSL 120, compatibili OpenGL 2.1)
+//---------------------------------------------
+
+// Vertex shader: converte pixel -> clip-space
+var overlayVert120 = `
+#version 120
+attribute vec2 position;
+
+uniform vec2 uCenterPx;     // centro in pixel
+uniform float uRadiusPx;    // raggio in pixel
+uniform vec2 uWinSize;      // dimensioni finestra in pixel
+uniform int uMode;          // 0=vert,1=orizz,2=circle
+
+void main() {
+
+    vec2 p = position;  // base units: circle is unit circle
+
+    if (uMode == 0) {
+        // linea verticale: x = 0
+        p = vec2(0.0, position.y) * uRadiusPx + uCenterPx;
+    }
+    else if (uMode == 1) {
+        // linea orizzontale: y = 0
+        p = vec2(position.x, 0.0) * uRadiusPx + uCenterPx;
+    }
+    else if (uMode == 2) {
+        // cerchio
+        p = position * uRadiusPx + uCenterPx;
+    }
+
+    // ---- convert pixel -> clip space ----
+    float clipX = (p.x / uWinSize.x) * 2.0 - 1.0;
+    float clipY = 1.0 - (p.y / uWinSize.y) * 2.0;
+
+    gl_Position = vec4(clipX, clipY, 0.0, 1.0);
+}
+` + "\x00"
+
+var overlayFrag120 = `
+#version 120
+uniform vec4 uColor;
+void main() {
+    gl_FragColor = uColor;
+}
+` + "\x00"
+
+//---------------------------------------------
+// COMPILAZIONE SHADER
+//---------------------------------------------
+
+func compileShader120(src string, shaderType uint32) uint32 {
+	sh := gl.CreateShader(shaderType)
+	csrc, free := gl.Strs(src)
+	gl.ShaderSource(sh, 1, csrc, nil)
+	free()
+	gl.CompileShader(sh)
+
+	var status int32
+	gl.GetShaderiv(sh, gl.COMPILE_STATUS, &status)
+	if status == gl.FALSE {
+		var logLen int32
+		gl.GetShaderiv(sh, gl.INFO_LOG_LENGTH, &logLen)
+		log := make([]byte, logLen)
+		gl.GetShaderInfoLog(sh, logLen, nil, &log[0])
+		panic(fmt.Sprintf("Shader compile error: %s", log))
+	}
+	return sh
+}
+
+func buildProgram120(vsSrc, fsSrc string) uint32 {
+	vs := compileShader120(vsSrc, gl.VERTEX_SHADER)
+	fs := compileShader120(fsSrc, gl.FRAGMENT_SHADER)
+
+	p := gl.CreateProgram()
+	gl.AttachShader(p, vs)
+	gl.AttachShader(p, fs)
+	gl.LinkProgram(p)
+	return p
+}
+
+//---------------------------------------------
+// GEOMETRIA (cerchio + due linee)
+//---------------------------------------------
+
+func createOverlayVBO() uint32 {
+	const N = 36
+
+	// cerchio unitario
+	verts := make([]float32, 0, (N+4)*2)
+
+	for i := 0; i < N; i++ {
+		ang := float64(i) * 2 * math.Pi / float64(N)
+		verts = append(verts, float32(math.Cos(ang)))
+		verts = append(verts, float32(math.Sin(ang)))
+	}
+
+	// linea orizzontale (-1..1)
+	verts = append(verts, -1, 0)
+	verts = append(verts, 1, 0)
+
+	// linea verticale
+	verts = append(verts, 0, -1)
+	verts = append(verts, 0, 1)
+
+	var vbo uint32
+	gl.GenBuffers(1, &vbo)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
+	gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.STATIC_DRAW)
+	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
+	return vbo
+}
+
+//---------------------------------------------
+// INIT
+//---------------------------------------------
+
+func InitOverlayGL21(winW, winH int) {
+	winWpx = float32(winW)
+	winHpx = float32(winH)
+
+	overlayProg = buildProgram120(overlayVert120, overlayFrag120)
+	overlayVBO = createOverlayVBO()
+}
+
+//---------------------------------------------
+// DISEGNO FORME (pixel-based)
+//---------------------------------------------
+
+func drawOne(mode int, cx, cy, radius float32, r, g, b, a float32) {
+	gl.UseProgram(overlayProg)
+
+	gl.BindBuffer(gl.ARRAY_BUFFER, overlayVBO)
+
+	posLoc := uint32(gl.GetAttribLocation(overlayProg, gl.Str("position\x00")))
+	gl.EnableVertexAttribArray(posLoc)
+	gl.VertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, nil)
+
+	gl.Uniform1i(gl.GetUniformLocation(overlayProg, gl.Str("uMode\x00")), int32(mode))
+	gl.Uniform1f(gl.GetUniformLocation(overlayProg, gl.Str("uRadiusPx\x00")), radius)
+	gl.Uniform2f(gl.GetUniformLocation(overlayProg, gl.Str("uCenterPx\x00")), cx, cy)
+	gl.Uniform2f(gl.GetUniformLocation(overlayProg, gl.Str("uWinSize\x00")), winWpx, winHpx)
+	gl.Uniform4f(gl.GetUniformLocation(overlayProg, gl.Str("uColor\x00")), r, g, b, a)
+
+	const N = 36
+
+	switch mode {
+	case 0: // verticale
+		gl.DrawArrays(gl.LINES, N+2, 2)
+	case 1: // orizzontale
+		gl.DrawArrays(gl.LINES, N, 2)
+	case 2: // cerchio
+		gl.DrawArrays(gl.LINE_LOOP, 0, N)
+	}
+
+	gl.DisableVertexAttribArray(posLoc)
+	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
+}
+
+//---------------------------------------------
+// FUNZIONE PUBBLICA
+//---------------------------------------------
+
+func DrawOverlayGL21(cx, cy, radius float32) {
+
+	// cerchio blu
+	drawOne(2, cx, cy, radius, 0, 0, 1, 1)
+
+	// linea orizzontale verde
+	drawOne(1, cx, cy, radius, 0, 1, 0, 1)
+
+	// linea verticale rossa
+	drawOne(0, cx, cy, radius, 1, 0, 0, 1)
+}

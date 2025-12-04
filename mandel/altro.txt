@@ -1,0 +1,96 @@
+func mandelbrotHeight_P(ix, iy, ws, hs int) float64 {
+
+	rd := 2.0e-14
+	cx := -0.74363948934687806869
+	cy := -0.13182214829942981438
+	maxIter := 1200
+
+	xx := rd
+	pv := (2.0 * xx)
+
+	pxc := float64(ix) / float64(ws)
+	pxc -= 0.5
+	pxc *= (float64(ws) / float64(hs))
+	pxc *= pv
+
+	pyc := float64(iy) / float64(hs)
+	pyc -= 0.5
+	pyc *= pv
+
+	dc := complex128(complex(pxc, pyc))
+
+	c := complex128(complex(cx, cy))
+	z := complex128(complex(0, 0))  //0 + 0i
+	dz := complex128(complex(0, 0)) //0 + 0i
+
+	iteration := 0
+
+	r := 1000.0
+	r2 := r * 2
+	_ = r2
+
+	for ; iteration < maxIter; iteration++ {
+
+		dz = (((2.0 * z) + dz) * dz) + dc
+		z = (z * z) + c
+
+		dotProduct := math.Sqrt(real(dz)*real(dz) + imag(dz)*imag(dz))
+		// if dotProduct > 4.0 {
+		if dotProduct > r {
+			break
+		}
+
+	}
+
+	zx := real(dz)
+	zy := imag(dz)
+
+	// if iteration == (maxIter + 100) { // per escludere momentaneamente
+	if iteration == maxIter { // per escludere momentaneamente
+		// return float64(maxIter)
+		zx = 1 / zx
+		zy = 1 / zy
+	} else {
+		zx = 1 * zx
+		zy = 1 * zy
+	}
+
+	// escape time smussato
+	zx1 := zx //- x
+	zy1 := zy //- y
+	mod := math.Sqrt(zx1*zx1 + zy1*zy1)
+	mu := float64(iteration) + 1.0 - math.Log(math.Log(mod))/math.Log(2)
+	_ = mu
+
+	// iteration1 := mu
+	// if float64(iteration1) > Max {
+	// 	Max = float64(iteration1)
+	// }
+	// if float64(iteration1) < Min {
+	// 	Min = float64(iteration1)
+	// }
+
+	// return mu
+
+	// https://www.youtube.com/watch?v=zmWkhlocBRY&t=636s
+	// minuto 24:23
+	dist := math.Sqrt(zx*zx + zy*zy)
+	fractIter := (dist - r) / (r2 - r)
+	_ = fractIter
+	fractIter = math.Log(dist) / math.Log(r)
+	fractIter = math.Log(fractIter) / math.Log(2)
+	iter := float64(iteration) - fractIter
+	mu1 := math.Sqrt(iter) / float64(maxIter)
+	_ = mu1
+
+	// iteration1 := mu1
+	// if float64(iteration1) > Max {
+	// 	Max = float64(iteration1)
+	// }
+	// if float64(iteration1) < Min {
+	// 	Min = float64(iteration1)
+	// }
+
+	return mu1
+
+}

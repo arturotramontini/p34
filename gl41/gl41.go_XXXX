@@ -1,0 +1,594 @@
+package gl41
+
+import (
+	"fmt"
+	"math"
+	"os"
+
+	"github.com/go-gl/gl/v4.1-core/gl"
+)
+
+const KN = 36
+
+var GroupColors = map[int][4]float32{}    // groupID -> RGBA
+var defaultColor = [4]float32{0, 1, 0, 1} // verde
+
+type Line struct {
+	X1, Y1 float32
+	X2, Y2 float32
+	Alive  bool
+	Group  int
+	Color  [4]float32 // <--- aggiunto!
+}
+
+var lines []Line
+
+// Programmi shader
+var progQuad uint32
+var progOverlay uint32
+var progLine uint32
+
+// VAO/VBO quad fullscreen
+var vaoQuad uint32
+var vboQuad uint32
+
+// VAO/VBO overlay (cerchio + croci)
+var vaoOverlay uint32
+var vboOverlay uint32
+
+// VAO/VBO x Line
+var vaoLine uint32
+var vboLine uint32
+
+// size finestra
+var winW int
+var winH int
+
+// var lineVerts = make([]float32, 0)
+var verts = make([]float32, 0)
+
+func SetWinsize(w, h int) {
+	winW = w
+	winH = h
+}
+
+// =======================================
+// Lettura shader
+// =======================================
+func loadFile(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	return string(b) + "\x00"
+}
+
+// =======================================
+// Compilazione shader
+// =======================================
+func compile(src string, shaderType uint32) uint32 {
+	sh := gl.CreateShader(shaderType)
+	csrc, free := gl.Strs(src)
+	gl.ShaderSource(sh, 1, csrc, nil)
+	free()
+	gl.CompileShader(sh)
+
+	var ok int32
+	gl.GetShaderiv(sh, gl.COMPILE_STATUS, &ok)
+	if ok == gl.FALSE {
+		var logLen int32
+		gl.GetShaderiv(sh, gl.INFO_LOG_LENGTH, &logLen)
+		log := make([]byte, logLen)
+		gl.GetShaderInfoLog(sh, logLen, nil, &log[0])
+		panic("GL SHADER ERROR:\n" + string(log))
+	}
+	return sh
+}
+
+func buildProgram(vs, fs string) uint32 {
+	v := compile(vs, gl.VERTEX_SHADER)
+	f := compile(fs, gl.FRAGMENT_SHADER)
+
+	p := gl.CreateProgram()
+	gl.AttachShader(p, v)
+	gl.AttachShader(p, f)
+	gl.LinkProgram(p)
+	return p
+}
+
+// =======================================
+// Inizializzazione OpenGL 4.1
+// =======================================
+func InitGL41() {
+
+	// --------- QUAD FULLSCREEN -------------
+	// vsQuad := loadFile("gl41/shaders/quad.vert")
+	// fsQuad := loadFile("gl41/shaders/quad.frag")
+	// progQuad = buildProgram(vsQuad, fsQuad)
+	fmt.Println("Carico quad.vert")
+	vsQuad := loadFile("gl41/shaders/quad.vert")
+	fmt.Println("Carico quad.frag")
+	fsQuad := loadFile("gl41/shaders/quad.frag")
+
+	fmt.Println("Compilo QUAD program")
+	progQuad = buildProgram(vsQuad, fsQuad)
+	fmt.Println("OK quad programmato")
+
+	quadVerts := []float32{
+		-1, -1,
+		1, -1,
+		1, 1,
+		-1, -1,
+		1, 1,
+		-1, 1,
+	}
+
+	gl.GenVertexArrays(1, &vaoQuad)
+	gl.BindVertexArray(vaoQuad)
+
+	gl.GenBuffers(1, &vboQuad)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vboQuad)
+	gl.BufferData(gl.ARRAY_BUFFER, len(quadVerts)*4, gl.Ptr(quadVerts), gl.STATIC_DRAW)
+
+	loc := uint32(gl.GetAttribLocation(progQuad, gl.Str("position\x00")))
+	gl.EnableVertexAttribArray(loc)
+	gl.VertexAttribPointer(loc, 2, gl.FLOAT, false, 0, nil)
+
+	gl.BindVertexArray(0)
+
+	// // --------- OVERLAY (cerchio + croci) ---------
+
+	// // vsOv := loadFile("gl41/shaders/overlay.vert")
+	// // fsOv := loadFile("gl41/shaders/overlay.frag")
+	// // progOverlay = buildProgram(vsOv, fsOv)
+	// fmt.Println("Carico overlay.vert")
+	// vsOv := loadFile("gl41/shaders/overlay.vert")
+	// fmt.Println("Carico overlay.frag")
+	// fsOv := loadFile("gl41/shaders/overlay.frag")
+
+	// fmt.Println("Compilo OVERLAY program")
+	// progOverlay = buildProgram(vsOv, fsOv)
+	// fmt.Println("OK overlay programmato")
+
+	// const N = 64
+	// verts := make([]float32, 0, (N+8)*2)
+
+	// // cerchio unitario
+	// for i := 0; i < N; i++ {
+	// 	ang := float64(i) * 2 * math.Pi / float64(N)
+	// 	verts = append(verts, float32(math.Cos(ang)))
+	// 	verts = append(verts, float32(math.Sin(ang)))
+	// }
+
+	// // rettangolo orizzontale (4 vertici)
+	// verts = append(verts, -1, -0.5)
+	// verts = append(verts, 1, -0.5)
+	// verts = append(verts, -1, 0.5)
+	// verts = append(verts, 1, 0.5)
+
+	// // rettangolo verticale (4 vertici)
+	// verts = append(verts, -0.5, -1)
+	// verts = append(verts, 0.5, -1)
+	// verts = append(verts, -0.5, 1)
+	// verts = append(verts, 0.5, 1)
+
+	// gl.GenVertexArrays(1, &vaoOverlay)
+	// gl.BindVertexArray(vaoOverlay)
+
+	// gl.GenBuffers(1, &vboOverlay)
+	// gl.BindBuffer(gl.ARRAY_BUFFER, vboOverlay)
+	// gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.STATIC_DRAW)
+
+	// loc2 := uint32(gl.GetAttribLocation(progOverlay, gl.Str("position\x00")))
+	// gl.EnableVertexAttribArray(loc2)
+	// gl.VertexAttribPointer(loc2, 2, gl.FLOAT, false, 0, nil)
+
+	// gl.BindVertexArray(0)
+	// //------------
+
+	// --------------------------------------------------------
+	// overlay (cerchio + 2 rettangoli per la croce)
+	// --------------------------------------------------------
+
+	vsOverlay := loadFile("gl41/shaders/overlay.vert")
+	fsOverlay := loadFile("gl41/shaders/overlay.frag")
+	progOverlay = buildProgram(vsOverlay, fsOverlay)
+
+	// cerchio (36 punti)
+	const N = 36
+
+	// circle := make([]float32, 0, (N+6+6)*2)
+
+	// for i := 0; i < N; i++ {
+	// 	ang := float64(i) * 6.2831853 / N
+	// 	circle = append(circle, float32(math.Cos(ang)), float32(math.Sin(ang)))
+	// }
+
+	// // rettangolo orizzontale (triangoli)
+	// rectH := []float32{
+	// 	-1.0, -0.5,
+	// 	+1.0, -0.5,
+	// 	+1.0, +0.5,
+
+	// 	-1.0, -0.5,
+	// 	+1.0, +0.5,
+	// 	-1.0, +0.5,
+	// }
+
+	// // rettangolo verticale (triangoli)
+	// rectV := []float32{
+	// 	-0.5, -1.0,
+	// 	+0.5, -1.0,
+	// 	+0.5, +1.0,
+
+	// 	-0.5, -1.0,
+	// 	+0.5, +1.0,
+	// 	-0.5, +1.0,
+	// }
+
+	// // concatenazione
+	// overlayVerts := append(circle, append(rectH, rectV...)...)
+
+	verts := make([]float32, 0, (N+6+6)*2)
+
+	// cerchio
+	for i := 0; i < N; i++ {
+		ang := float32(i) * 6.28318 / N
+		verts = append(verts, float32(math.Cos(float64(ang))))
+		verts = append(verts, float32(math.Sin(float64(ang))))
+	}
+
+	// rettangolo orizzontale
+	verts = append(verts,
+		-1, -0.2,
+		1, -0.2,
+		-1, 0.2,
+		1, 0.2,
+	)
+
+	// rettangolo verticale
+	verts = append(verts,
+		-0.2, -1,
+		0.2, -1,
+		-0.2, 1,
+		0.2, 1,
+	)
+
+	// // rettangolo orizzontale (triangoli)
+	// rectH := []float32{
+	// 	-1.0, -0.5,
+	// 	+1.0, -0.5,
+	// 	// +1.0, +0.5,
+
+	// 	-1.0, 0.5,
+	// 	+1.0, 0.5,
+	// 	// -1.0, +0.5,
+	// }
+
+	// // rettangolo orizzontale (triangoli)
+	// rectH := []float32{
+	// 	-1, -4,
+	// 	+1, -4,
+	// 	// +1.0, +0.5,
+
+	// 	-1, 4,
+	// 	+1, 4,
+	// 	// -1.0, +0.5,
+	// }
+	// // verts = append(verts, rectH...)
+
+	// // rettangolo verticale (triangoli)
+	// rectV := []float32{
+	// 	-2.5, -1.0,
+	// 	+2.5, -1.0,
+	// 	// +0.5, +1.0,
+
+	// 	-2.5, 1.0,
+	// 	+2.5, +1.0,
+	// 	// -0.5, +1.0,
+	// }
+	// // rettangolo verticale
+	// // verts = append(verts, rectV...)
+
+	// verts = append(verts, append(rectH, rectV...)...)
+
+	println("len verts =", len(verts))
+
+	gl.GenVertexArrays(1, &vaoOverlay)
+	gl.BindVertexArray(vaoOverlay)
+
+	gl.GenBuffers(1, &vboOverlay)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vboOverlay)
+	gl.BufferData(gl.ARRAY_BUFFER, 4*len(verts), gl.Ptr(verts), gl.STATIC_DRAW)
+
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(0)
+
+	gl.BindVertexArray(0)
+
+	// ---------------------------------------
+	// LINE SHADER
+	// ---------------------------------------
+	vsLine := loadFile("gl41/shaders/line.vert")
+	fsLine := loadFile("gl41/shaders/line.frag")
+	progLine = buildProgram(vsLine, fsLine)
+
+	// VAO/VBO linee (vuoto all’inizio)
+	gl.GenVertexArrays(1, &vaoLine)
+	gl.GenBuffers(1, &vboLine)
+
+	gl.BindVertexArray(vaoLine)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vboLine)
+	gl.BufferData(gl.ARRAY_BUFFER, 0, nil, gl.DYNAMIC_DRAW)
+
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(0)
+
+	gl.BindVertexArray(0)
+
+	// ---------------------------------------
+
+	// ---------------------------------------
+
+	gl.Enable(gl.BLEND)
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+
+	// ---------------------------------------
+}
+
+// =======================================
+// funzioni x aggiungere linee
+// =======================================
+// func AddLine(x1, y1, x2, y2 float32) {
+// 	lineVerts = append(lineVerts,
+// 		x1, y1,
+// 		x2, y2,
+// 	)
+
+//		gl.BindBuffer(gl.ARRAY_BUFFER, vboLine)
+//		gl.BufferData(gl.ARRAY_BUFFER, len(lineVerts)*4, gl.Ptr(lineVerts), gl.DYNAMIC_DRAW)
+//		gl.BindBuffer(gl.ARRAY_BUFFER, 0)
+//	}
+func SetGroupColor(group int, r, g, b, a float32) {
+	GroupColors[group] = [4]float32{r, g, b, a}
+}
+
+func AddLine(x1, y1, x2, y2 float32, group int) int {
+
+	col, ok := GroupColors[group]
+	if !ok {
+		col = defaultColor
+	}
+
+	ln := Line{
+		X1: x1, Y1: y1,
+		X2: x2, Y2: y2,
+		Alive: true,
+		Group: group,
+		Color: col,
+	}
+	lines = append(lines, ln)
+
+	rebuildLineVBO()
+	return len(lines) - 1 // ID della linea
+}
+func HideGroup(g int) {
+	for i := range lines {
+		if lines[i].Group == g {
+			lines[i].Alive = false
+		}
+	}
+	rebuildLineVBO()
+}
+
+func ShowGroup(g int) {
+	for i := range lines {
+		if lines[i].Group == g {
+			lines[i].Alive = true
+		}
+	}
+	rebuildLineVBO()
+}
+func RemoveGroup(g int) {
+	for i := range lines {
+		if lines[i].Group == g {
+			lines[i].Alive = false
+		}
+	}
+	CompactLines() // <-- la tua funzione che pulisce tutto
+}
+
+func RemoveLine(id int) {
+	if id < 0 || id >= len(lines) {
+		return
+	}
+	lines[id].Alive = false
+	rebuildLineVBO()
+}
+
+func CompactLines() {
+	newSlice := lines[:0] // riusa la memoria esistente
+
+	for _, ln := range lines {
+		if ln.Alive {
+			newSlice = append(newSlice, ln)
+		}
+	}
+
+	lines = newSlice
+	rebuildLineVBO()
+}
+
+func rebuildLineVBO() {
+	tmp := make([]float32, 0) //, len(lines)*12)
+
+	for _, ln := range lines {
+		if !ln.Alive {
+			continue
+		}
+
+		r, g, b, a := ln.Color[0], ln.Color[1], ln.Color[2], ln.Color[3]
+
+		tmp = append(tmp,
+			ln.X1, ln.Y1, r, g, b, a,
+			ln.X2, ln.Y2, r, g, b, a,
+		)
+	}
+
+	verts = tmp
+
+	gl.BindBuffer(gl.ARRAY_BUFFER, vboLine)
+	gl.BufferData(gl.ARRAY_BUFFER, 4*len(verts), gl.Ptr(verts), gl.DYNAMIC_DRAW)
+}
+
+// func rebuildLineVBO() {
+// 	// verts := make([]float32, 0, len(lines)*4)
+// 	// verts = make([]float32, 0, len(lines)*4)
+// 	verts = make([]float32, 0)
+
+// 	for _, ln := range lines {
+// 		if !ln.Alive {
+// 			continue
+// 		}
+// 		r, g, b, a := ln.Color[0], ln.Color[1], ln.Color[2], ln.Color[3]
+// 		r, g, b, a = 1., 1., 1., 1.
+// 		verts = append(verts,
+// 			ln.X1, ln.Y1, r, g, b, a,
+// 			ln.X2, ln.Y2, r, g, b, a,
+// 		)
+// 	}
+
+// 	gl.BindBuffer(gl.ARRAY_BUFFER, vboLine)
+// 	if len(verts) > 0 {
+// 		gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.DYNAMIC_DRAW)
+// 	} else {
+// 		gl.BufferData(gl.ARRAY_BUFFER, 0, nil, gl.DYNAMIC_DRAW)
+// 	}
+// 	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
+
+// 	// CompactLines()
+
+// }
+
+func RenderLines() {
+	gl.UseProgram(progLine)
+
+	gl.Uniform2f(gl.GetUniformLocation(progLine, gl.Str("uWinSize\x00")),
+		float32(winW), float32(winH))
+
+	gl.BindVertexArray(vaoLine)
+	// gl.DrawArrays(gl.LINES, 0, int32(len(lineVerts)/2))
+	gl.DrawArrays(gl.LINES, 0, int32(len(verts)/2))
+	gl.BindVertexArray(0)
+}
+
+// =======================================
+// Texture moderna
+// =======================================
+func CreateTexture(w, h int) uint32 {
+	winW = w
+	winH = h
+
+	var t uint32
+	gl.GenTextures(1, &t)
+	gl.BindTexture(gl.TEXTURE_2D, t)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, int32(w), int32(h),
+		0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+
+	return t
+}
+
+func UpdateTexture(tex uint32, pixels []uint32) {
+	gl.BindTexture(gl.TEXTURE_2D, tex)
+	gl.TexSubImage2D(gl.TEXTURE_2D, 0, 0, 0,
+		int32(winW), int32(winH),
+		gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(pixels))
+}
+
+// =======================================
+// Render fullscreen
+// =======================================
+func RenderFullscreen(tex uint32, w, h int) {
+
+	gl.UseProgram(progQuad)
+
+	loc := gl.GetUniformLocation(progQuad, gl.Str("tex\x00"))
+	gl.Uniform1i(loc, 0)
+
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, tex)
+
+	gl.BindVertexArray(vaoQuad)
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+	gl.BindVertexArray(0)
+}
+
+// =======================================
+// Disegno overlay cerchio + croci
+// =======================================
+// func DrawOverlay(cx, cy, radius float32) {
+
+// 	gl.UseProgram(progOverlay)
+
+// 	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uCenterPx\x00")), cx, cy)
+// 	gl.Uniform1f(gl.GetUniformLocation(progOverlay, gl.Str("uRadiusPx\x00")), radius)
+// 	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uWinSize\x00")), float32(winW), float32(winH))
+
+// 	// colore giallo ben visibile
+// 	gl.Uniform4f(gl.GetUniformLocation(progOverlay, gl.Str("uColor\x00")),
+// 		1.0, 1.0, 0.0, 1.0)
+
+// 	gl.BindVertexArray(vaoOverlay)
+
+// 	const N = 36
+
+// 	// locMode := gl.GetUniformLocation(progOverlay, gl.Str("uMode\x00"))
+// 	// fmt.Println("loc uMode =", locMode)
+
+// 	// cerchio
+// 	gl.Uniform1i(gl.GetUniformLocation(progOverlay, gl.Str("uMode\x00")), 0)
+// 	gl.DrawArrays(gl.LINE_LOOP, 0, N)
+
+// 	// orizzontale
+// 	gl.Uniform1i(gl.GetUniformLocation(progOverlay, gl.Str("uMode\x00")), 1)
+// 	gl.DrawArrays(gl.TRIANGLES, N, 6)
+
+// 	// verticale
+// 	gl.Uniform1i(gl.GetUniformLocation(progOverlay, gl.Str("uMode\x00")), 2)
+// 	gl.DrawArrays(gl.TRIANGLES, N+6, 6)
+
+//		gl.BindVertexArray(0)
+//	}
+func DrawOverlay(cx, cy, radius float32) {
+	gl.UseProgram(progOverlay)
+	gl.BindVertexArray(vaoOverlay)
+
+	// Parametri comuni
+	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uCenterPx\x00")), cx, cy)
+	gl.Uniform1f(gl.GetUniformLocation(progOverlay, gl.Str("uRadiusPx\x00")), radius)
+	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uWinSize\x00")), float32(winW), float32(winH))
+
+	// ---- Cerchio (verde)
+	gl.Uniform1i(gl.GetUniformLocation(progOverlay, gl.Str("uMode\x00")), 0)
+	gl.Uniform1f(gl.GetUniformLocation(progOverlay, gl.Str("uThickness\x00")), 2)
+	gl.Uniform4f(gl.GetUniformLocation(progOverlay, gl.Str("uColor\x00")), 1, 1, 0, 1)
+	gl.DrawArrays(gl.LINE_LOOP, 0, 36)
+
+	// ---- Linea orizzontale (rossa)
+	gl.Uniform1i(gl.GetUniformLocation(progOverlay, gl.Str("uMode\x00")), 1)
+	gl.Uniform4f(gl.GetUniformLocation(progOverlay, gl.Str("uColor\x00")), 1, 1, 0, 1)
+	gl.DrawArrays(gl.TRIANGLE_STRIP, 36, 4)
+
+	// ---- Linea verticale (blu)
+	gl.Uniform1i(gl.GetUniformLocation(progOverlay, gl.Str("uMode\x00")), 2)
+	gl.Uniform4f(gl.GetUniformLocation(progOverlay, gl.Str("uColor\x00")), 1, 1, 0, 1)
+	gl.DrawArrays(gl.TRIANGLE_STRIP, 40, 4)
+
+	gl.BindVertexArray(0)
+}

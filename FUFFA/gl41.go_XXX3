@@ -1,0 +1,144 @@
+package gl41
+
+import (
+	"math"
+	"os"
+
+	"github.com/go-gl/gl/v4.1-core/gl"
+)
+
+// shader program
+var progOverlay uint32
+
+// VAO/VBO cerchio
+var vaoCircle uint32
+var vboCircle uint32
+
+// VAO/VBO croce
+var vaoCross uint32
+var vboCross uint32
+
+var winW, winH int
+
+// ------------------------------------------------------------
+// Utility
+// ------------------------------------------------------------
+func loadFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	return string(data) + "\x00"
+}
+
+func compile(src string, typ uint32) uint32 {
+	sh := gl.CreateShader(typ)
+	cstr, free := gl.Strs(src)
+	gl.ShaderSource(sh, 1, cstr, nil)
+	free()
+	gl.CompileShader(sh)
+
+	var status int32
+	gl.GetShaderiv(sh, gl.COMPILE_STATUS, &status)
+	if status == gl.FALSE {
+		var logLen int32
+		gl.GetShaderiv(sh, gl.INFO_LOG_LENGTH, &logLen)
+		log := make([]byte, logLen)
+		gl.GetShaderInfoLog(sh, logLen, nil, &log[0])
+		panic("SHADER ERROR: " + string(log))
+	}
+	return sh
+}
+
+func buildProgram(vs, fs string) uint32 {
+	v := compile(vs, gl.VERTEX_SHADER)
+	f := compile(fs, gl.FRAGMENT_SHADER)
+	p := gl.CreateProgram()
+	gl.AttachShader(p, v)
+	gl.AttachShader(p, f)
+	gl.LinkProgram(p)
+	return p
+}
+
+// ------------------------------------------------------------
+// Crea cerchio
+// ------------------------------------------------------------
+func makeCircle(N int) {
+	verts := make([]float32, 0, N*2)
+	for i := 0; i < N; i++ {
+		a := float32(i) * 2 * math.Pi / float32(N)
+		verts = append(verts, float32(math.Cos(float64(a))))
+		verts = append(verts, float32(math.Sin(float64(a))))
+	}
+
+	gl.GenVertexArrays(1, &vaoCircle)
+	gl.BindVertexArray(vaoCircle)
+
+	gl.GenBuffers(1, &vboCircle)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vboCircle)
+	gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.STATIC_DRAW)
+
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(0)
+
+	gl.BindVertexArray(0)
+}
+
+// ------------------------------------------------------------
+// Crea croce (4 vertici fissi)
+// ------------------------------------------------------------
+func makeCross() {
+	verts := []float32{
+		-1, 0, 1, 0, // orizzontale
+		0, -1, 0, 1, // verticale
+	}
+
+	gl.GenVertexArrays(1, &vaoCross)
+	gl.BindVertexArray(vaoCross)
+
+	gl.GenBuffers(1, &vboCross)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vboCross)
+	gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.STATIC_DRAW)
+
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(0)
+
+	gl.BindVertexArray(0)
+}
+
+// ------------------------------------------------------------
+// Init
+// ------------------------------------------------------------
+func InitOverlay(w, h int) {
+	winW, winH = w, h
+
+	vs := loadFile("gl41/shaders/overlay.vert")
+	fs := loadFile("gl41/shaders/overlay.frag")
+
+	progOverlay = buildProgram(vs, fs)
+
+	makeCircle(96) // 🔥 puoi mettere qualsiasi numero
+	makeCross()
+}
+
+// ------------------------------------------------------------
+// Draw
+// ------------------------------------------------------------
+func DrawOverlay(cx, cy, r float32) {
+	gl.UseProgram(progOverlay)
+
+	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uCenterPx\x00")), cx, cy)
+	gl.Uniform1f(gl.GetUniformLocation(progOverlay, gl.Str("uRadiusPx\x00")), r)
+	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uWinSize\x00")), float32(winW), float32(winH))
+	gl.Uniform4f(gl.GetUniformLocation(progOverlay, gl.Str("uColor\x00")), 1, 1, 1, 1)
+
+	// cerchio
+	gl.BindVertexArray(vaoCircle)
+	gl.DrawArrays(gl.LINE_LOOP, 0, 96)
+
+	// croce
+	gl.BindVertexArray(vaoCross)
+	gl.DrawArrays(gl.LINES, 0, 4)
+
+	gl.BindVertexArray(0)
+}

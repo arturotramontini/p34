@@ -1,0 +1,265 @@
+package gl41
+
+import (
+	"math"
+	"unsafe"
+
+	"github.com/go-gl/gl/v4.1-core/gl"
+)
+
+// -----------------------------------------------------------------------------
+// Variabili globali
+// -----------------------------------------------------------------------------
+var (
+	progQuad    uint32
+	progOverlay uint32
+
+	vaoQuad    uint32
+	vboQuad    uint32
+	vaoOverlay uint32
+	vboOverlay uint32
+
+	winW int
+	winH int
+)
+
+// -----------------------------------------------------------------------------
+// Shader inline (versione 410 core, compatibile con macOS)
+// -----------------------------------------------------------------------------
+
+// Fullscreen quad
+var quadVertSrc = `
+#version 410 core
+layout (location = 0) in vec2 position;
+out vec2 uv;
+
+void main() {
+    uv = (position + 1.0) * 0.5;
+    gl_Position = vec4(position, 0.0, 1.0);
+}
+` + "\x00"
+
+var quadFragSrc = `
+#version 410 core
+in vec2 uv;
+out vec4 fragColor;
+
+uniform sampler2D tex;
+
+void main() {
+    fragColor = texture(tex, uv);
+}
+` + "\x00"
+
+// Overlay (cerchio + croce)
+var overlayVertSrc = `
+#version 410 core
+layout (location = 0) in vec2 position;
+
+uniform vec2 uCenterPx;
+uniform float uRadiusPx;
+uniform vec2 uWinSize;
+
+void main() {
+    vec2 p = position * uRadiusPx + uCenterPx;
+
+    float clipX = (p.x / uWinSize.x) * 2.0 - 1.0;
+    float clipY = 1.0 - (p.y / uWinSize.y) * 2.0;
+
+    gl_Position = vec4(clipX, clipY, 0.0, 1.0);
+}
+` + "\x00"
+
+var overlayFragSrc = `
+#version 410 core
+out vec4 fragColor;
+uniform vec4 uColor;
+
+void main() {
+    fragColor = uColor;
+}
+` + "\x00"
+
+// -----------------------------------------------------------------------------
+// Compilazione shader
+// -----------------------------------------------------------------------------
+
+func compile(src string, shaderType uint32) uint32 {
+	sh := gl.CreateShader(shaderType)
+
+	csrc, free := gl.Strs(src)
+	gl.ShaderSource(sh, 1, csrc, nil)
+	free()
+
+	gl.CompileShader(sh)
+
+	var status int32
+	gl.GetShaderiv(sh, gl.COMPILE_STATUS, &status)
+	if status == gl.FALSE {
+		var logLen int32
+		gl.GetShaderiv(sh, gl.INFO_LOG_LENGTH, &logLen)
+		log := make([]byte, logLen)
+		gl.GetShaderInfoLog(sh, logLen, nil, &log[0])
+		panic("SHADER ERROR: " + string(log))
+	}
+	return sh
+}
+
+func buildProgram(vsSrc, fsSrc string) uint32 {
+	vs := compile(vsSrc, gl.VERTEX_SHADER)
+	fs := compile(fsSrc, gl.FRAGMENT_SHADER)
+
+	p := gl.CreateProgram()
+	gl.AttachShader(p, vs)
+	gl.AttachShader(p, fs)
+	gl.LinkProgram(p)
+
+	return p
+}
+
+// -----------------------------------------------------------------------------
+// Inizializzazione OpenGL moderna
+// -----------------------------------------------------------------------------
+
+func InitGL41() {
+
+	// -----------------------------------------
+	// Fullscreen quad
+	// -----------------------------------------
+	progQuad = buildProgram(quadVertSrc, quadFragSrc)
+
+	quadVerts := []float32{
+		-1, -1,
+		+1, -1,
+		+1, +1,
+		-1, -1,
+		+1, +1,
+		-1, +1,
+	}
+
+	gl.GenVertexArrays(1, &vaoQuad)
+	gl.BindVertexArray(vaoQuad)
+
+	gl.GenBuffers(1, &vboQuad)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vboQuad)
+	gl.BufferData(gl.ARRAY_BUFFER, len(quadVerts)*4, gl.Ptr(quadVerts), gl.STATIC_DRAW)
+
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(0)
+
+	gl.BindVertexArray(0)
+
+	// -----------------------------------------
+	// Overlay (cerchio + croce)
+	// -----------------------------------------
+	progOverlay = buildProgram(overlayVertSrc, overlayFragSrc)
+
+	const N = 36
+	verts := make([]float32, 0, N*2+4*2)
+
+	// cerchio unitario
+	for i := 0; i < N; i++ {
+		ang := float32(i) * 2.0 * math.Pi / N
+		verts = append(verts, float32(math.Cos(float64(ang))))
+		verts = append(verts, float32(math.Sin(float64(ang))))
+	}
+
+	// orizzontale
+	verts = append(verts, -1, 0)
+	verts = append(verts, +1, 0)
+
+	// verticale
+	verts = append(verts, 0, -1)
+	verts = append(verts, 0, +1)
+
+	gl.GenVertexArrays(1, &vaoOverlay)
+	gl.BindVertexArray(vaoOverlay)
+
+	gl.GenBuffers(1, &vboOverlay)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vboOverlay)
+	gl.BufferData(gl.ARRAY_BUFFER, len(verts)*4, gl.Ptr(verts), gl.STATIC_DRAW)
+
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(0)
+
+	gl.BindVertexArray(0)
+
+	gl.Enable(gl.BLEND)
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+}
+
+// -----------------------------------------------------------------------------
+// Texture moderna (RGBA8)
+// -----------------------------------------------------------------------------
+
+func CreateTexture(w, h int) uint32 {
+	winW = w
+	winH = h
+
+	var tex uint32
+	gl.GenTextures(1, &tex)
+	gl.BindTexture(gl.TEXTURE_2D, tex)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8,
+		int32(w), int32(h),
+		0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+
+	return tex
+}
+
+func UpdateTexture(tex uint32, pixels []uint32) {
+	gl.BindTexture(gl.TEXTURE_2D, tex)
+
+	gl.TexSubImage2D(gl.TEXTURE_2D, 0,
+		0, 0,
+		int32(winW), int32(winH),
+		gl.RGBA, gl.UNSIGNED_BYTE,
+		unsafe.Pointer(&pixels[0]),
+	)
+}
+
+// -----------------------------------------------------------------------------
+// Render fullscreen quad
+// -----------------------------------------------------------------------------
+
+func RenderFullscreen(tex uint32, w, h int) {
+	gl.UseProgram(progQuad)
+
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, tex)
+
+	loc := gl.GetUniformLocation(progQuad, gl.Str("tex\x00"))
+	gl.Uniform1i(loc, 0)
+
+	gl.BindVertexArray(vaoQuad)
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+	gl.BindVertexArray(0)
+}
+
+// -----------------------------------------------------------------------------
+// Overlay: cerchio + croce
+// -----------------------------------------------------------------------------
+
+func DrawOverlay(cx, cy, radius float32) {
+
+	gl.UseProgram(progOverlay)
+
+	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uCenterPx\x00")), cx, cy)
+	gl.Uniform1f(gl.GetUniformLocation(progOverlay, gl.Str("uRadiusPx\x00")), radius)
+	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uWinSize\x00")), float32(winW), float32(winH))
+	gl.Uniform4f(gl.GetUniformLocation(progOverlay, gl.Str("uColor\x00")), 1, 1, 0, 1) // giallo
+
+	gl.BindVertexArray(vaoOverlay)
+
+	const N = 36
+	gl.DrawArrays(gl.LINE_LOOP, 0, N) // cerchio
+	gl.DrawArrays(gl.LINES, N, 2)     // orizzontale
+	gl.DrawArrays(gl.LINES, N+2, 2)   // verticale
+
+	gl.BindVertexArray(0)
+}

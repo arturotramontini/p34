@@ -1,0 +1,239 @@
+package gl41
+
+import (
+	"math"
+	"os"
+
+	"github.com/go-gl/gl/v4.1-core/gl"
+)
+
+// programmi shader
+var progQuad uint32
+var progOverlay uint32
+
+// VAO/VBO quad fullscreen
+var vaoQuad uint32
+var vboQuad uint32
+
+// VAO/VBO overlay (cerchio + croce)
+var vaoOverlay uint32
+var vboOverlay uint32
+
+// finestra
+var winW int
+var winH int
+
+// ------------------------------------------------------------
+// Lettura file shader
+// ------------------------------------------------------------
+func loadFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	return string(data) + "\x00"
+}
+
+// ------------------------------------------------------------
+// Compila singolo shader
+// ------------------------------------------------------------
+func compile(src string, shaderType uint32) uint32 {
+	sh := gl.CreateShader(shaderType)
+	csrc, free := gl.Strs(src)
+	gl.ShaderSource(sh, 1, csrc, nil)
+	free()
+	gl.CompileShader(sh)
+
+	var status int32
+	gl.GetShaderiv(sh, gl.COMPILE_STATUS, &status)
+	if status == gl.FALSE {
+		var logLen int32
+		gl.GetShaderiv(sh, gl.INFO_LOG_LENGTH, &logLen)
+		log := make([]byte, logLen)
+		gl.GetShaderInfoLog(sh, logLen, nil, &log[0])
+		panic("GL SHADER ERROR: " + string(log))
+	}
+	return sh
+}
+
+// ------------------------------------------------------------
+// Linka vertex + fragment
+// ------------------------------------------------------------
+func buildProgram(vs, fs string) uint32 {
+	v := compile(vs, gl.VERTEX_SHADER)
+	f := compile(fs, gl.FRAGMENT_SHADER)
+
+	p := gl.CreateProgram()
+	gl.AttachShader(p, v)
+	gl.AttachShader(p, f)
+	gl.LinkProgram(p)
+
+	return p
+}
+
+// ------------------------------------------------------------
+// Inizializzazione OpenGL 4.1
+// ------------------------------------------------------------
+func InitGL41() {
+
+	// carica shader fullscreen quad
+	vsQuad := loadFile("gl41/shaders/quad.vert")
+	fsQuad := loadFile("gl41/shaders/quad.frag")
+	progQuad = buildProgram(vsQuad, fsQuad)
+
+	// quad: due triangoli
+	quadVerts := []float32{
+		-1, -1,
+		+1, -1,
+		+1, +1,
+		-1, -1,
+		+1, +1,
+		-1, +1,
+	}
+
+	gl.GenVertexArrays(1, &vaoQuad)
+	gl.BindVertexArray(vaoQuad)
+
+	gl.GenBuffers(1, &vboQuad)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vboQuad)
+	gl.BufferData(gl.ARRAY_BUFFER, 4*len(quadVerts), gl.Ptr(quadVerts), gl.STATIC_DRAW)
+
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(0)
+
+	gl.BindVertexArray(0)
+
+	// --------------------------------------------------------
+	// overlay
+	// --------------------------------------------------------
+
+	vsOverlay := loadFile("gl41/shaders/overlay.vert")
+	fsOverlay := loadFile("gl41/shaders/overlay.frag")
+	progOverlay = buildProgram(vsOverlay, fsOverlay)
+
+	// cerchio + croce (36 segmenti)
+	const N = 36
+	verts := make([]float32, 0, N*2+4*2)
+
+	for i := 0; i < N; i++ {
+		ang := float32(i) * 6.28318 / N
+		verts = append(verts, float32(cos(ang)))
+		verts = append(verts, float32(sin(ang)))
+	}
+
+	// linea orizzontale (da -1 a +1)
+	verts = append(verts, -1, 0)
+	verts = append(verts, +1, 0)
+
+	// linea verticale
+	verts = append(verts, 0, -1)
+	verts = append(verts, 0, +1)
+
+	gl.GenVertexArrays(1, &vaoOverlay)
+	gl.BindVertexArray(vaoOverlay)
+
+	gl.GenBuffers(1, &vboOverlay)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vboOverlay)
+	gl.BufferData(gl.ARRAY_BUFFER, 4*len(verts), gl.Ptr(verts), gl.STATIC_DRAW)
+
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, nil)
+	gl.EnableVertexAttribArray(0)
+
+	gl.BindVertexArray(0)
+
+	gl.Enable(gl.BLEND)
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+}
+
+// ------------------------------------------------------------
+// Texture moderna
+// ------------------------------------------------------------
+func CreateTexture(w, h int) uint32 {
+	winW = w
+	winH = h
+
+	var tex uint32
+	gl.GenTextures(1, &tex)
+	gl.BindTexture(gl.TEXTURE_2D, tex)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, int32(w), int32(h),
+		0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+
+	return tex
+}
+
+// aggiorna la texture con il tuo array pixels []uint32
+func UpdateTexture(tex uint32, pixels []uint32) {
+	gl.BindTexture(gl.TEXTURE_2D, tex)
+	gl.TexSubImage2D(gl.TEXTURE_2D, 0,
+		0, 0,
+		int32(winW), int32(winH),
+		gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(pixels))
+}
+
+// ------------------------------------------------------------
+// Disegna texture fullscreen
+// ------------------------------------------------------------
+func RenderFullscreen(tex uint32, w, h int) {
+
+	gl.UseProgram(progQuad)
+
+	//----- aggiunta ---
+	loc := gl.GetAttribLocation(progQuad, gl.Str("position\x00"))
+	gl.EnableVertexAttribArray(uint32(loc))
+	gl.VertexAttribPointer(uint32(loc), 2, gl.FLOAT, false, 0, nil)
+	//------------
+
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, tex)
+
+	loc = gl.GetUniformLocation(progQuad, gl.Str("tex\x00"))
+	gl.Uniform1i(loc, 0)
+
+	gl.BindVertexArray(vaoQuad)
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+	gl.BindVertexArray(0)
+}
+
+// ------------------------------------------------------------
+// Disegna overlay cerchio+croce
+// ------------------------------------------------------------
+func DrawOverlay(cx, cy, radius float32) {
+	gl.UseProgram(progOverlay)
+
+	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uCenterPx\x00")), cx, cy)
+	gl.Uniform1f(gl.GetUniformLocation(progOverlay, gl.Str("uRadiusPx\x00")), radius)
+	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uWinSize\x00")), float32(winW), float32(winH))
+	gl.Uniform4f(gl.GetUniformLocation(progOverlay, gl.Str("uColor\x00")), 0, 1, 0, 1)
+
+	gl.BindVertexArray(vaoOverlay)
+
+	const N = 36
+	gl.DrawArrays(gl.LINE_LOOP, 0, N) // cerchio
+	gl.DrawArrays(gl.LINES, N, 2)     // orizzontale
+	gl.DrawArrays(gl.LINES, N+2, 2)   // verticale
+
+	gl.BindVertexArray(0)
+}
+
+// // ------------------------------------------------------------
+// // Mini sin/cos inline
+// // ------------------------------------------------------------
+//
+//	func sin(a float32) float32 {
+//		return float32(mathSin(float64(a)))
+//	}
+//
+//	func cos(a float32) float32 {
+//		return float32(mathCos(float64(a)))
+//	}
+//
+// func mathSin(x float64) float64 { return (x - (x*x*x)/6.0) } // semplificato
+// func mathCos(x float64) float64 { return (1 - (x*x)/2.0) }
+func sin(a float32) float32 { return float32(math.Sin(float64(a))) }
+func cos(a float32) float32 { return float32(math.Cos(float64(a))) }

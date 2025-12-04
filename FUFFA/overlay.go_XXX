@@ -1,0 +1,117 @@
+package gl41
+
+import (
+	"math"
+
+	gl "github.com/go-gl/gl/v4.1-core/gl"
+)
+
+var (
+	overlayVAO  uint32
+	overlayVBO  uint32
+	progOverlay uint32
+
+	winW float32
+	winH float32
+)
+
+// ----------------------------------------------------------
+// INIT OVERLAY (cerchio + croce)
+// ----------------------------------------------------------
+
+func InitOverlay41(w, h int) {
+	winW = float32(w)
+	winH = float32(h)
+
+	createOverlayGeometry()
+	loadOverlayShader()
+}
+
+// ----------------------------------------------------------
+// GEOMETRIA: cerchio + linee
+// ----------------------------------------------------------
+
+func createOverlayGeometry() {
+	const N = 64
+	vertices := make([]float32, 0, (N+4)*2)
+
+	// Cerchio unitario
+	for i := 0; i < N; i++ {
+		a := float32(i) * 6.28318 / float32(N)
+		vertices = append(vertices, float32(cos(a)))
+		vertices = append(vertices, float32(sin(a)))
+	}
+
+	// Linea orizzontale (-1..1)
+	vertices = append(vertices, -1, 0)
+	vertices = append(vertices, 1, 0)
+
+	// Linea verticale (-1..1)
+	vertices = append(vertices, 0, -1)
+	vertices = append(vertices, 0, 1)
+
+	gl.GenVertexArrays(1, &overlayVAO)
+	gl.GenBuffers(1, &overlayVBO)
+
+	gl.BindVertexArray(overlayVAO)
+	gl.BindBuffer(gl.ARRAY_BUFFER, overlayVBO)
+	gl.BufferData(gl.ARRAY_BUFFER, len(vertices)*4, gl.Ptr(vertices), gl.STATIC_DRAW)
+
+	gl.EnableVertexAttribArray(0)
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 2*4, gl.PtrOffset(0))
+
+	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
+	gl.BindVertexArray(0)
+}
+
+func cos(x float32) float32 { return float32(mathCos(float64(x))) }
+func sin(x float32) float32 { return float32(mathSin(float64(x))) }
+
+func mathCos(x float64) float64 { return math.Cos(x) }
+func mathSin(x float64) float64 { return math.Sin(x) }
+
+// ----------------------------------------------------------
+// SHADER OVERLAY
+// ----------------------------------------------------------
+
+func loadOverlayShader() {
+	vs := compileShader(loadFile("gl41/shaders/overlay.vert"), gl.VERTEX_SHADER)
+	fs := compileShader(loadFile("gl41/shaders/overlay.frag"), gl.FRAGMENT_SHADER)
+
+	progOverlay = gl.CreateProgram()
+	gl.AttachShader(progOverlay, vs)
+	gl.AttachShader(progOverlay, fs)
+	gl.LinkProgram(progOverlay)
+}
+
+// ----------------------------------------------------------
+// DRAW OVERLAY
+// ----------------------------------------------------------
+
+func DrawOverlay41(cx, cy, radius float32) {
+
+	gl.UseProgram(progOverlay)
+
+	// Uniforms
+	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uCenterPx\x00")), cx, cy)
+	gl.Uniform1f(gl.GetUniformLocation(progOverlay, gl.Str("uRadiusPx\x00")), radius)
+	gl.Uniform2f(gl.GetUniformLocation(progOverlay, gl.Str("uWinSize\x00")), winW, winH)
+
+	gl.BindVertexArray(overlayVAO)
+
+	const N = 64
+
+	// Cerchio
+	gl.Uniform4f(gl.GetUniformLocation(progOverlay, gl.Str("uColor\x00")), 0, 0.6, 1, 1)
+	gl.DrawArrays(gl.LINE_LOOP, 0, N)
+
+	// Linea orizzontale (dopo il cerchio)
+	gl.Uniform4f(gl.GetUniformLocation(progOverlay, gl.Str("uColor\x00")), 0, 1, 0, 1)
+	gl.DrawArrays(gl.LINES, N, 2)
+
+	// Linea verticale
+	gl.Uniform4f(gl.GetUniformLocation(progOverlay, gl.Str("uColor\x00")), 1, 0, 0, 1)
+	gl.DrawArrays(gl.LINES, N+2, 2)
+
+	gl.BindVertexArray(0)
+}

@@ -1,0 +1,140 @@
+package gl41
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	gl "github.com/go-gl/gl/v4.1-core/gl"
+)
+
+// ------------------------------------------------------------------
+//  VARIABILI
+// ------------------------------------------------------------------
+
+var (
+	quadVAO   uint32
+	quadVBO   uint32
+	progQuad  uint32
+	winWidth  int32
+	winHeight int32
+)
+
+// ------------------------------------------------------------------
+//  FUNZIONE DI INIZIALIZZAZIONE OPENGL 4.1
+// ------------------------------------------------------------------
+
+func InitGL41(w, h int) {
+	winWidth = int32(w)
+	winHeight = int32(h)
+
+	// Inizializza OpenGL
+	if err := gl.Init(); err != nil {
+		panic(fmt.Sprintf("Errore gl.Init(): %v", err))
+	}
+
+	fmt.Println("OpenGL Version:", gl.GoStr(gl.GetString(gl.VERSION)))
+
+	createScreenQuad()
+	loadQuadShader()
+}
+
+// ------------------------------------------------------------------
+//  CREA IL QUAD A SCHERMO INTERO (VAO + VBO)
+// ------------------------------------------------------------------
+
+func createScreenQuad() {
+
+	// 6 vertici (2 triangoli)
+	vertices := []float32{
+		// pos      // tex
+		-1, -1, 0, 0,
+		-1, 1, 0, 1,
+		1, 1, 1, 1,
+
+		-1, -1, 0, 0,
+		1, 1, 1, 1,
+		1, -1, 1, 0,
+	}
+
+	gl.GenVertexArrays(1, &quadVAO)
+	gl.GenBuffers(1, &quadVBO)
+
+	gl.BindVertexArray(quadVAO)
+	gl.BindBuffer(gl.ARRAY_BUFFER, quadVBO)
+	gl.BufferData(gl.ARRAY_BUFFER, len(vertices)*4, gl.Ptr(vertices), gl.STATIC_DRAW)
+
+	// posizione (vec2)
+	gl.EnableVertexAttribArray(0)
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 4*4, gl.PtrOffset(0))
+
+	// texcoord (vec2)
+	gl.EnableVertexAttribArray(1)
+	gl.VertexAttribPointer(1, 2, gl.FLOAT, false, 4*4, gl.PtrOffset(2*4))
+
+	gl.BindBuffer(gl.ARRAY_BUFFER, 0)
+	gl.BindVertexArray(0)
+}
+
+// ------------------------------------------------------------------
+//  SHADER LOADER
+// ------------------------------------------------------------------
+
+func compileShader(source string, shaderType uint32) uint32 {
+	shader := gl.CreateShader(shaderType)
+	csources, free := gl.Strs(source)
+	gl.ShaderSource(shader, 1, csources, nil)
+	free()
+	gl.CompileShader(shader)
+
+	var status int32
+	gl.GetShaderiv(shader, gl.COMPILE_STATUS, &status)
+	if status == gl.FALSE {
+		var logLen int32
+		gl.GetShaderiv(shader, gl.INFO_LOG_LENGTH, &logLen)
+		log := strings.Repeat("\x00", int(logLen+1))
+		gl.GetShaderInfoLog(shader, logLen, nil, gl.Str(log))
+		panic(fmt.Sprintf("Errore compilazione shader: %s", log))
+	}
+	return shader
+}
+
+func loadFile(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		panic("Impossibile leggere shader: " + path)
+	}
+	return string(b) + "\x00"
+}
+
+// ------------------------------------------------------------------
+//  CREA PROGRAMMA SHADER PER QUAD
+// ------------------------------------------------------------------
+
+func loadQuadShader() {
+	vs := compileShader(loadFile("gl41/shaders/quad.vert"), gl.VERTEX_SHADER)
+	fs := compileShader(loadFile("gl41/shaders/quad.frag"), gl.FRAGMENT_SHADER)
+
+	progQuad = gl.CreateProgram()
+	gl.AttachShader(progQuad, vs)
+	gl.AttachShader(progQuad, fs)
+	gl.LinkProgram(progQuad)
+}
+
+// ------------------------------------------------------------------
+//  RENDER DELLA TEXTURE A SCHERMO INTERO
+// ------------------------------------------------------------------
+
+func RenderTexture(tex uint32) {
+	gl.UseProgram(progQuad)
+
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, tex)
+
+	loc := gl.GetUniformLocation(progQuad, gl.Str("uTex\x00"))
+	gl.Uniform1i(loc, 0)
+
+	gl.BindVertexArray(quadVAO)
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+	gl.BindVertexArray(0)
+}
