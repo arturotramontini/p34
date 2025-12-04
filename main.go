@@ -129,7 +129,7 @@ func MandelbrotColor(cx, cy float64) uint32 {
 }
 
 // calcola un blocco 8x8 di Mandelbrot
-const KeachPixel = 4
+const KeachPixel = 5
 
 func drawBlock(px, py int) {
 
